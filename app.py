@@ -22,12 +22,18 @@ st.set_page_config(
 # ===============================================
 @st.cache_data
 def load_data():
+   
     try:
-        df = pd.read_csv("Mental Health Dataset.csv")
+        df = pd.read_csv("Mental Health Dataset.zip")
     except FileNotFoundError:
-        st.error("⚠️ File 'Mental Health Dataset.csv' not found.")
-        return pd.DataFrame()
+        
+        try:
+            df = pd.read_csv("Mental Health Dataset.csv")
+        except FileNotFoundError:
+            st.error("⚠️ Error: File not found! Please ensure 'Mental Health Dataset.zip' or '.csv' is uploaded.")
+            return pd.DataFrame()
 
+   
     if "Timestamp" in df.columns:
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
         df["Date"] = df["Timestamp"].dt.date
@@ -35,7 +41,6 @@ def load_data():
         df["DayOfWeek"] = df["Timestamp"].dt.day_name()
     
     return df
-
 df = load_data()
 
 if df.empty:
@@ -399,4 +404,5 @@ with tab6:
                 except Exception as e:
                     st.error(f"API Error: {e}")
             else:
+
                 st.warning("Please enter Gemini API Key in the sidebar to enable chat.")
