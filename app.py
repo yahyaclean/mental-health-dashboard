@@ -22,18 +22,12 @@ st.set_page_config(
 # ===============================================
 @st.cache_data
 def load_data():
-   
     try:
-        df = pd.read_csv("Mental Health Dataset.zip")
+        df = pd.read_csv("Mental Health Dataset.csv")
     except FileNotFoundError:
-        
-        try:
-            df = pd.read_csv("Mental Health Dataset.csv")
-        except FileNotFoundError:
-            st.error("⚠️ Error: File not found! Please ensure 'Mental Health Dataset.zip' or '.csv' is uploaded.")
-            return pd.DataFrame()
+        st.error("⚠️ File 'Mental Health Dataset.csv' not found.")
+        return pd.DataFrame()
 
-   
     if "Timestamp" in df.columns:
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
         df["Date"] = df["Timestamp"].dt.date
@@ -41,6 +35,7 @@ def load_data():
         df["DayOfWeek"] = df["Timestamp"].dt.day_name()
     
     return df
+
 df = load_data()
 
 if df.empty:
@@ -49,18 +44,10 @@ if df.empty:
 target = "treatment"
 
 # ===============================================
-# 🔍 SIDEBAR FILTERS & API KEY MANAGEMENT
+# 🔍 SIDEBAR FILTERS & API KEY
 # ===============================================
-st.sidebar.header("🔍 Filter Data")
-
-# --- SECRET MANAGEMENT LOGIC ---
-# 1. Try to find the key in Streamlit Secrets (Best for Deployment)
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-# 2. If not found (e.g. running locally without setup), ask manually
-else:
-    st.sidebar.warning("⚠️ No API Key found in Secrets.")
-    api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
+st.sidebar.header("🔑 AI Configuration")
+api_key = st.sidebar.text_input("Gemini API Key", type="password", placeholder="Paste Google API Key here...")
 
 st.sidebar.divider()
 st.sidebar.header("🔍 Filter Data")
@@ -100,7 +87,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ===============================================
-# TABS 1-4 (Visualizations)
+# TABS 1-4 (Visualizations) - Same as First Code
 # ===============================================
 with tab1:
     col1, col2 = st.columns([1, 1])
@@ -201,11 +188,11 @@ with tab5:
             st.plotly_chart(fig, use_container_width=True)
 
 # ===============================================
-# 🤖 TAB 6: HYBRID INTERACTIVE CHATBOT
+# 🤖 TAB 6: WIZARD-STYLE HYBRID CHATBOT
 # ===============================================
 with tab6:
     st.header("🤖 Interactive AI Clinic")
-    st.markdown("Use this tool to analyze your status and then **chat** with the AI Assistant about the results.")
+    st.markdown("Use this tool to analyze your status step-by-step and then **chat** with the AI Assistant.")
 
     # --- Session State Management ---
     if "analysis_done" not in st.session_state:
@@ -216,6 +203,8 @@ with tab6:
         st.session_state.user_inputs = {}
     if "prediction_result" not in st.session_state:
         st.session_state.prediction_result = {}
+    if "current_step_idx" not in st.session_state:
+        st.session_state.current_step_idx = 0
 
     # 1. Load XGBoost Model
     model_path = "mental_health_xgboost.pkl"
@@ -227,117 +216,139 @@ with tab6:
             st.error(f"❌ Error loading model: {e}")
 
     # ===============================================
-    # STEP 1: DATA ENTRY FORM
+    # STEP 1: WIZARD DATA ENTRY (Divided Logic)
     # ===============================================
     if not st.session_state.analysis_done:
         if xgb_model:
-            with st.form("assessment_form"):
-                st.subheader("📝 Patient Assessment")
-                input_data = {}
-                cols = st.columns(3)
-                
-                for i, col in enumerate(rel_cols):
-                    with cols[i % 3]:
+            
+            # Define Question Groups
+            question_groups = {
+                "Step 1: Basics": ["Gender", "Country", "Occupation", "self_employed"],
+                "Step 2: Medical History": ["family_history", "Mental_Health_History", "care_options", "mental_health_interview"],
+                "Step 3: Lifestyle": ["Days_Indoors", "Growing_Stress", "Changes_Habits", "Mood_Swings"],
+                "Step 4: Social & Coping": ["Coping_Struggles", "Work_Interest", "Social_Weakness"]
+            }
+            group_names = list(question_groups.keys())
+            
+            # Get current step
+            current_group_name = group_names[st.session_state.current_step_idx]
+            current_cols = question_groups[current_group_name]
+            
+            # Progress Bar
+            progress = (st.session_state.current_step_idx + 1) / len(group_names)
+            st.progress(progress, text=f"Assessment Progress: {current_group_name}")
+            
+            with st.container():
+                with st.form(key=f"form_step_{st.session_state.current_step_idx}"):
+                    st.subheader(current_group_name)
+                    c1, c2 = st.columns(2)
+                    step_responses = {}
+                    
+                    for i, col in enumerate(current_cols):
+                        target_col = c1 if i % 2 == 0 else c2
                         if df[col].dtype == 'object':
                             options = sorted(df[col].dropna().unique().tolist())
-                            input_data[col] = st.selectbox(f"{col}", options)
+                            step_responses[col] = target_col.selectbox(f"{col}", options)
                         else:
                             min_v, max_v = float(df[col].min()), float(df[col].max())
-                            input_data[col] = st.number_input(f"{col}", min_value=min_v, max_value=max_v, value=float(df[col].mean()))
+                            step_responses[col] = target_col.number_input(f"{col}", min_value=min_v, max_value=max_v)
+
+                    # Determine Button Text
+                    is_last_step = st.session_state.current_step_idx == len(group_names) - 1
+                    btn_label = "🚀 Run Diagnosis" if is_last_step else "Next Step ➡"
+                    submit_step = st.form_submit_button(label=btn_label)
+            
+            if submit_step:
+                # Save answers
+                st.session_state.user_inputs.update(step_responses)
                 
-                submit_btn = st.form_submit_button("🚀 Run Diagnosis & Start Chat")
-
-            if submit_btn:
-                # --- A. RUN XGBOOST LOGIC ---
-                try:
-                    st.session_state.user_inputs = input_data
-                    input_df = pd.DataFrame([input_data])
-                    
-                    # Preprocessing
-                    input_df['Gender'] = input_df['Gender'].map({'Male': 0, 'Female': 1})
-                    input_df['self_employed'] = input_df['self_employed'].map({'No': 0, 'Yes': 1}).fillna(0)
-                    input_df['family_history'] = input_df['family_history'].map({'No': 0, 'Yes': 1})
-                    input_df['Coping_Struggles'] = input_df['Coping_Struggles'].map({'No': 0, 'Yes': 1})
-                    input_df['Mood_Swings'] = input_df['Mood_Swings'].map({'Low': 0, 'Medium': 1, 'High': 2})
-                    input_df['Days_Indoors'] = input_df['Days_Indoors'].map({'Go out Every day': 0, '1-14 days': 1, '15-30 days': 2, '31-60 days': 3, 'More than 2 months': 4})
-                    
-                    for col in ['Growing_Stress', 'Changes_Habits', 'Mental_Health_History', 'Work_Interest', 'Social_Weakness', 'mental_health_interview', 'care_options']:
-                        le = LabelEncoder().fit(df[col].astype(str))
-                        val = str(input_data[col])
-                        input_df[col] = le.transform([val]) if val in le.classes_ else 0
-
-                    input_df['Stress_Score'] = input_df[['Days_Indoors', 'Growing_Stress', 'Changes_Habits', 'Coping_Struggles', 'Mood_Swings']].mean(axis=1)
-                    input_df['Social_Function_Score'] = input_df['Work_Interest'] - input_df['Social_Weakness']
-                    input_df['SelfEmployment_Risk'] = input_df['self_employed'] * (1 - input_df['care_options'])
-                    input_df['Family_Support_Impact'] = input_df['family_history'] * input_df['Coping_Struggles']
-
-                    now = pd.Timestamp.now()
-                    input_df['Year'], input_df['Month'], input_df['Day'], input_df['Hour'] = now.year, now.month, now.day, now.hour
-                    input_df['Is_Winter'] = input_df['Month'].isin([12, 1, 2]).astype(int)
-                    input_df['Is_MidYear'] = input_df['Month'].between(5, 8).astype(int)
-                    input_df['Is_Night'] = ((input_df['Hour'] >= 20) | (input_df['Hour'] <= 6)).astype(int)
-
-                    all_occ = sorted(df['Occupation'].unique())
-                    user_occ = input_data['Occupation']
-                    for occ in all_occ: input_df[f"Occupation_{occ}"] = 1 if occ == user_occ else 0
-                    if 'Occupation' in input_df.columns: input_df.drop(columns=['Occupation'], inplace=True)
-                    
-                    if 'Country' in input_df.columns:
-                        le_c = LabelEncoder().fit(df['Country'].astype(str))
-                        val_c = str(input_data['Country'])
-                        input_df['Country'] = le_c.transform([val_c]) if val_c in le_c.classes_ else 0
-
-                    # Prediction
-                    prediction = xgb_model.predict(input_df)[0]
-                    prob = xgb_model.predict_proba(input_df)[0] if hasattr(xgb_model, "predict_proba") else [0,0]
-                    
-                    is_risk = (prediction == 1 or prediction == "Yes")
-                    confidence = prob[1] if is_risk else prob[0]
-                    
-                    st.session_state.prediction_result = {
-                        "text": "Treatment Likely Needed" if is_risk else "No Immediate Treatment Needed",
-                        "color": "red" if is_risk else "green",
-                        "confidence": f"{confidence*100:.1f}%",
-                        "is_risk": is_risk
-                    }
-                    
-                    # --- B. INITIALIZE CHAT ---
-                    risk_desc = "High Risk" if is_risk else "Low Risk"
-                    intro_prompt = f"""
-                    System Context: You are a compassionate mental health AI.
-                    User Data: Stress={input_data['Growing_Stress']}, Indoors={input_data['Days_Indoors']}, Mood={input_data['Mood_Swings']}.
-                    Diagnosis: The XGBoost model predicts **{risk_desc}** with {confidence*100:.1f}% confidence.
-                    
-                    Your Task:
-                    1. Greet the user warmly based on this result.
-                    2. If High Risk: validate their feelings gently.
-                    3. If Low Risk: encourage them.
-                    4. Ask an open-ended question to start a conversation.
-                    5. Keep it short.
-                    """
-                    
-                    if api_key:
-                        try:
-                            genai.configure(api_key=api_key)
-                            model_name = "gemini-pro"
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    if 'flash' in m.name: model_name = m.name; break
-                            
-                            model = genai.GenerativeModel(model_name)
-                            response = model.generate_content(intro_prompt)
-                            initial_msg = response.text
-                        except:
-                            initial_msg = "Hello. I have analyzed your profile. How are you feeling right now?"
-                    else:
-                        initial_msg = "Analysis Complete. Please enter API Key to chat. (Standard Mode: How can I help?)"
-
-                    st.session_state.messages = [{"role": "assistant", "content": initial_msg}]
-                    st.session_state.analysis_done = True
+                if not is_last_step:
+                    st.session_state.current_step_idx += 1
                     st.rerun()
+                else:
+                    # --- FINAL STEP: RUN XGBOOST LOGIC ---
+                    try:
+                        input_data = st.session_state.user_inputs
+                        input_df = pd.DataFrame([input_data])
+                        
+                        # Preprocessing
+                        input_df['Gender'] = input_df['Gender'].map({'Male': 0, 'Female': 1})
+                        input_df['self_employed'] = input_df['self_employed'].map({'No': 0, 'Yes': 1}).fillna(0)
+                        input_df['family_history'] = input_df['family_history'].map({'No': 0, 'Yes': 1})
+                        input_df['Coping_Struggles'] = input_df['Coping_Struggles'].map({'No': 0, 'Yes': 1})
+                        input_df['Mood_Swings'] = input_df['Mood_Swings'].map({'Low': 0, 'Medium': 1, 'High': 2})
+                        input_df['Days_Indoors'] = input_df['Days_Indoors'].map({'Go out Every day': 0, '1-14 days': 1, '15-30 days': 2, '31-60 days': 3, 'More than 2 months': 4})
+                        
+                        for col in ['Growing_Stress', 'Changes_Habits', 'Mental_Health_History', 'Work_Interest', 'Social_Weakness', 'mental_health_interview', 'care_options']:
+                            le = LabelEncoder().fit(df[col].astype(str))
+                            val = str(input_data[col])
+                            input_df[col] = le.transform([val]) if val in le.classes_ else 0
 
-                except Exception as e:
-                    st.error(f"Analysis Error: {e}")
+                        input_df['Stress_Score'] = input_df[['Days_Indoors', 'Growing_Stress', 'Changes_Habits', 'Coping_Struggles', 'Mood_Swings']].mean(axis=1)
+                        input_df['Social_Function_Score'] = input_df['Work_Interest'] - input_df['Social_Weakness']
+                        input_df['SelfEmployment_Risk'] = input_df['self_employed'] * (1 - input_df['care_options'])
+                        input_df['Family_Support_Impact'] = input_df['family_history'] * input_df['Coping_Struggles']
+
+                        now = pd.Timestamp.now()
+                        input_df['Year'], input_df['Month'], input_df['Day'], input_df['Hour'] = now.year, now.month, now.day, now.hour
+                        input_df['Is_Winter'] = input_df['Month'].isin([12, 1, 2]).astype(int)
+                        input_df['Is_MidYear'] = input_df['Month'].between(5, 8).astype(int)
+                        input_df['Is_Night'] = ((input_df['Hour'] >= 20) | (input_df['Hour'] <= 6)).astype(int)
+
+                        all_occ = sorted(df['Occupation'].unique())
+                        user_occ = input_data['Occupation']
+                        for occ in all_occ: input_df[f"Occupation_{occ}"] = 1 if occ == user_occ else 0
+                        if 'Occupation' in input_df.columns: input_df.drop(columns=['Occupation'], inplace=True)
+                        
+                        if 'Country' in input_df.columns:
+                            le_c = LabelEncoder().fit(df['Country'].astype(str))
+                            val_c = str(input_data['Country'])
+                            input_df['Country'] = le_c.transform([val_c]) if val_c in le_c.classes_ else 0
+
+                        # Prediction
+                        prediction = xgb_model.predict(input_df)[0]
+                        prob = xgb_model.predict_proba(input_df)[0] if hasattr(xgb_model, "predict_proba") else [0,0]
+                        
+                        is_risk = (prediction == 1 or prediction == "Yes")
+                        confidence = prob[1] if is_risk else prob[0]
+                        
+                        st.session_state.prediction_result = {
+                            "text": "Treatment Likely Needed" if is_risk else "No Immediate Treatment Needed",
+                            "color": "red" if is_risk else "green",
+                            "confidence": f"{confidence*100:.1f}%",
+                            "is_risk": is_risk
+                        }
+                        
+                        # --- INITIALIZE CHAT ---
+                        risk_desc = "High Risk" if is_risk else "Low Risk"
+                        intro_prompt = f"""
+                        System Context: You are a compassionate mental health AI.
+                        User Data: Stress={input_data['Growing_Stress']}, Indoors={input_data['Days_Indoors']}, Mood={input_data['Mood_Swings']}.
+                        Diagnosis: The XGBoost model predicts **{risk_desc}** with {confidence*100:.1f}% confidence.
+                        Your Task: Greet user warmly based on result. Validate feelings if high risk, encourage if low. Ask open question. Keep short.
+                        """
+                        
+                        if api_key:
+                            try:
+                                genai.configure(api_key=api_key)
+                                model_name = "gemini-pro"
+                                for m in genai.list_models():
+                                    if 'generateContent' in m.supported_generation_methods:
+                                        if 'flash' in m.name: model_name = m.name; break
+                                model = genai.GenerativeModel(model_name)
+                                response = model.generate_content(intro_prompt)
+                                initial_msg = response.text
+                            except:
+                                initial_msg = "Hello. I have analyzed your profile. How are you feeling right now?"
+                        else:
+                            initial_msg = "Analysis Complete. Please enter API Key to chat. (Standard Mode: How can I help?)"
+
+                        st.session_state.messages = [{"role": "assistant", "content": initial_msg}]
+                        st.session_state.analysis_done = True
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Analysis Error: {e}")
 
     # ===============================================
     # STEP 2: RESULTS DASHBOARD & CHAT INTERFACE
@@ -356,6 +367,8 @@ with tab6:
             
             if st.button("🔄 Start New Assessment"):
                 st.session_state.analysis_done = False
+                st.session_state.current_step_idx = 0
+                st.session_state.user_inputs = {}
                 st.session_state.messages = []
                 st.rerun()
         
@@ -404,5 +417,4 @@ with tab6:
                 except Exception as e:
                     st.error(f"API Error: {e}")
             else:
-
                 st.warning("Please enter Gemini API Key in the sidebar to enable chat.")
