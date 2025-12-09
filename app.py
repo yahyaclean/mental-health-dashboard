@@ -23,10 +23,13 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv("Mental Health Dataset.csv")
+        df = pd.read_csv("Mental Health Dataset.zip")
     except FileNotFoundError:
-        st.error("⚠️ File 'Mental Health Dataset.csv' not found.")
-        return pd.DataFrame()
+        try:
+            df = pd.read_csv("Mental Health Dataset.csv")
+        except FileNotFoundError:
+            st.error("⚠️ Error: File not found! Please ensure 'Mental Health Dataset.zip' or '.csv' is uploaded.")
+            return pd.DataFrame()
 
     if "Timestamp" in df.columns:
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
@@ -47,7 +50,11 @@ target = "treatment"
 # 🔍 SIDEBAR FILTERS & API KEY
 # ===============================================
 st.sidebar.header("🔑 AI Configuration")
-api_key = st.sidebar.text_input("Gemini API Key", type="password", placeholder="Paste Google API Key here...")
+# 1. Try to find the key in Streamlit Secrets
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+else:
+    api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
 st.sidebar.divider()
 st.sidebar.header("🔍 Filter Data")
@@ -87,8 +94,10 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ===============================================
-# TABS 1-4 (Visualizations) - Same as First Code
+# TABS 1-5 (EXACTLY AS FIRST CODE - FULL VISUALIZATIONS)
 # ===============================================
+
+# --- TAB 1: Stats & Correlation ---
 with tab1:
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -110,22 +119,25 @@ with tab1:
     le = LabelEncoder()
     for col in df_enc.columns:
         if df_enc[col].dtype == 'object': df_enc[col] = le.fit_transform(df_enc[col].astype(str))
-    st.plotly_chart(px.imshow(df_enc.corr(), text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1), use_container_width=True)
+    st.plotly_chart(px.imshow(df_enc.corr(), text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, title='Correlation Heatmap'), use_container_width=True)
 
+# --- TAB 2: Time ---
 with tab2:
     if "Timestamp" in filtered_df.columns:
         daily = filtered_df.groupby(["Date", target]).size().reset_index(name="count")
         st.plotly_chart(px.line(daily, x="Date", y="count", color=target, title="Trends Over Time"), use_container_width=True)
         heat = filtered_df[filtered_df[target] == "Yes"].pivot_table(index="DayOfWeek", columns="Hour", values=target, aggfunc="count", fill_value=0)
-        if not heat.empty: st.plotly_chart(px.imshow(heat, title="Heatmap by Day & Hour", aspect="auto", color_continuous_scale="Viridis"), use_container_width=True)
+        if not heat.empty: st.plotly_chart(px.imshow(heat, title="Treatment (Yes) Heatmap by Day & Hour", aspect="auto", color_continuous_scale="Viridis"), use_container_width=True)
 
+# --- TAB 3: Behavioral ---
 with tab3:
+    st.subheader("Multivariate Behavioral Analysis")
     b_df = filtered_df.copy()
-    b_df["score"] = b_df[target].map({"Yes": 1, "No": 0}).fillna(0)
-    st.plotly_chart(px.parallel_categories(b_df, dimensions=["Gender", "family_history", "care_options", target], color="score", color_continuous_scale=px.colors.sequential.Inferno), use_container_width=True)
+    b_df["treatment_score"] = b_df[target].map({"Yes": 1, "No": 0}).fillna(0)
+    st.plotly_chart(px.parallel_categories(b_df, dimensions=["Gender", "family_history", "care_options", target], color="treatment_score", color_continuous_scale=px.colors.sequential.Inferno), use_container_width=True)
     
     c1, c2 = st.columns(2)
-    with c1: st.plotly_chart(px.sunburst(filtered_df, path=["Country", "family_history", target], title="Sunburst"), use_container_width=True)
+    with c1: st.plotly_chart(px.sunburst(filtered_df, path=["Country", "family_history", target], title="Country → Family History → Treatment"), use_container_width=True)
     with c2:
         cols_r = ["care_options", "family_history", "Gender", "self_employed", "mental_health_interview"]
         temp_r = filtered_df.copy()
@@ -134,8 +146,9 @@ with tab3:
             if c in temp_r.columns: temp_r[c] = enc.fit_transform(temp_r[c].astype(str))
         if all(c in temp_r.columns for c in cols_r):
             r_data = temp_r.groupby(target)[cols_r].mean().reset_index()
-            st.plotly_chart(px.line_polar(r_data.melt(id_vars=target), r="value", theta="variable", color=target, line_close=True, title="Radar Chart"), use_container_width=True)
+            st.plotly_chart(px.line_polar(r_data.melt(id_vars=target), r="value", theta="variable", color=target, line_close=True, title="Radar Chart: Feature Averages"), use_container_width=True)
 
+# --- TAB 4: Geographic ---
 with tab4:
     if geo_col in filtered_df.columns:
         g_data = filtered_df.groupby([geo_col, target]).size().reset_index(name="count")
@@ -144,51 +157,26 @@ with tab4:
             piv["Rate"] = piv["Yes"] / (piv["Yes"] + piv["No"]) if "Yes" in piv.columns and "No" in piv.columns else 0
             st.plotly_chart(px.choropleth(piv.reset_index(), locations=geo_col, locationmode="country names", color="Rate", title="Global Treatment Rates"), use_container_width=True)
 
-# ===============================================
-# TAB 5: Deep Dive Relations (FULLY RESTORED)
-# ===============================================
+# --- TAB 5: Deep Dive ---
 with tab5:
     st.header("🔍 Deep Dive: Specific Relations")
-    
-    # 1. Psychological Relations
-    st.subheader("1. Internal Psychological Relations")
-    psych_pairs = [
-        ('Growing_Stress','Mood_Swings'),
-        ('Changes_Habits','Coping_Struggles'),
-        ('Mental_Health_History','family_history'),
-        ('Social_Weakness','Work_Interest')
-    ]
-    
-    col_p1, col_p2 = st.columns(2)
-    
+    psych_pairs = [('Growing_Stress','Mood_Swings'), ('Changes_Habits','Coping_Struggles'), ('Mental_Health_History','family_history'), ('Social_Weakness','Work_Interest')]
+    c1, c2 = st.columns(2)
     for i, (x, y) in enumerate(psych_pairs):
         if x in filtered_df.columns and y in filtered_df.columns:
             fig = px.histogram(filtered_df, x=x, color=y, barmode='group', title=f"{x} vs {y}", text_auto=True)
             fig.update_traces(textposition='outside')
+            (c1 if i%2==0 else c2).plotly_chart(fig, use_container_width=True)
             
-            if i % 2 == 0:
-                col_p1.plotly_chart(fig, use_container_width=True)
-            else:
-                col_p2.plotly_chart(fig, use_container_width=True)
-
     st.divider()
-
-    # 2. Work & Environment Relations
     st.subheader("2. Work & Environment Relations")
-    work_pairs = [
-        ('mental_health_interview','care_options'),
-        ('Occupation','care_options'),
-        ('self_employed','mental_health_interview')
-    ]
-    
+    work_pairs = [('mental_health_interview','care_options'), ('Occupation','care_options'), ('self_employed','mental_health_interview')]
     for x, y in work_pairs:
         if x in filtered_df.columns and y in filtered_df.columns:
-            fig = px.histogram(filtered_df, x=x, color=y, barmode='group', title=f"{x} vs {y}", text_auto=True)
-            fig.update_traces(textposition='outside')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.histogram(filtered_df, x=x, color=y, barmode='group', title=f"{x} vs {y}", text_auto=True), use_container_width=True)
 
 # ===============================================
-# 🤖 TAB 6: WIZARD-STYLE HYBRID CHATBOT
+# 🤖 TAB 6: FAST STEP-BY-STEP CHATBOT (FROM SECOND CODE)
 # ===============================================
 with tab6:
     st.header("🤖 Interactive AI Clinic")
@@ -214,6 +202,8 @@ with tab6:
             xgb_model = joblib.load(model_path)
         except Exception as e:
             st.error(f"❌ Error loading model: {e}")
+    else:
+        st.warning(f"⚠️ Model '{model_path}' not found. Please upload it.")
 
     # ===============================================
     # STEP 1: WIZARD DATA ENTRY (Divided Logic)
@@ -251,11 +241,11 @@ with tab6:
                             step_responses[col] = target_col.selectbox(f"{col}", options)
                         else:
                             min_v, max_v = float(df[col].min()), float(df[col].max())
-                            step_responses[col] = target_col.number_input(f"{col}", min_value=min_v, max_value=max_v)
+                            step_responses[col] = target_col.number_input(f"{col}", min_value=min_v, max_value=max_v, value=float(df[col].mean()))
 
                     # Determine Button Text
                     is_last_step = st.session_state.current_step_idx == len(group_names) - 1
-                    btn_label = "🚀 Run Diagnosis" if is_last_step else "Next Step ➡"
+                    btn_label = "🚀 Run Diagnosis & Chat" if is_last_step else "Next Step ➡"
                     submit_step = st.form_submit_button(label=btn_label)
             
             if submit_step:
@@ -351,7 +341,7 @@ with tab6:
                         st.error(f"Analysis Error: {e}")
 
     # ===============================================
-    # STEP 2: RESULTS DASHBOARD & CHAT INTERFACE
+    # STEP 2: RESULTS & CHAT (AFTER WIZARD)
     # ===============================================
     else:
         res = st.session_state.prediction_result
@@ -368,7 +358,6 @@ with tab6:
             if st.button("🔄 Start New Assessment"):
                 st.session_state.analysis_done = False
                 st.session_state.current_step_idx = 0
-                st.session_state.user_inputs = {}
                 st.session_state.messages = []
                 st.rerun()
         
