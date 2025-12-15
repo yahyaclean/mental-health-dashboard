@@ -204,13 +204,6 @@ with tab6:
             st.error(f"❌ Error loading model: {e}")
     else:
         st.warning(f"⚠️ Model '{model_path}' not found. Please upload it.")
-    # 🔍 DEBUG: check model class order
-   # 🔍 DEBUG: check model class order
-    if xgb_model:
-        st.sidebar.subheader("🧪 Model Debug")
-        st.sidebar.write("Model classes:", xgb_model.classes_)
-
-
 
     # ===============================================
     # STEP 1: WIZARD DATA ENTRY (Divided Logic)
@@ -305,18 +298,8 @@ with tab6:
                         # Prediction
                         prediction = xgb_model.predict(input_df)[0]
                         prob = xgb_model.predict_proba(input_df)[0] if hasattr(xgb_model, "predict_proba") else [0,0]
-                        prediction = int(prediction)  # تثبيت النوع
-
-                        st.write("🔎 Prediction value:", prediction)
-                        st.write("🔎 Prob Yes (1):", prob[1])
-                        st.write("🔎 Prob No (0):", prob[0])
-                        st.write("🔎 Is risk (should be True if 1):", prediction == 1)
-
                         
-                        prediction = int(prediction)   # مهم جدًا
-                        is_risk = prediction == 1
-                        confidence = prob[1]
-
+                        is_risk = (prediction == 1 or prediction == "Yes")
                         confidence = prob[1] if is_risk else prob[0]
                         
                         st.session_state.prediction_result = {
