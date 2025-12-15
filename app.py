@@ -305,8 +305,18 @@ with tab6:
                         # Prediction
                         prediction = xgb_model.predict(input_df)[0]
                         prob = xgb_model.predict_proba(input_df)[0] if hasattr(xgb_model, "predict_proba") else [0,0]
+                        prediction = int(prediction)  # تثبيت النوع
+
+                        st.write("🔎 Prediction value:", prediction)
+                        st.write("🔎 Prob Yes (1):", prob[1])
+                        st.write("🔎 Prob No (0):", prob[0])
+                        st.write("🔎 Is risk (should be True if 1):", prediction == 1)
+
                         
-                        is_risk = (prediction == 1 or prediction == "Yes")
+                        prediction = int(prediction)   # مهم جدًا
+                        is_risk = prediction == 1
+                        confidence = prob[1]
+
                         confidence = prob[1] if is_risk else prob[0]
                         
                         st.session_state.prediction_result = {
@@ -414,3 +424,4 @@ with tab6:
                     st.error(f"API Error: {e}")
             else:
                 st.warning("Please enter Gemini API Key in the sidebar to enable chat.")
+
