@@ -204,6 +204,13 @@ with tab6:
             st.error(f"❌ Error loading model: {e}")
     else:
         st.warning(f"⚠️ Model '{model_path}' not found. Please upload it.")
+    # 🔍 DEBUG: check model class order
+   # 🔍 DEBUG: check model class order
+    if xgb_model:
+        st.sidebar.subheader("🧪 Model Debug")
+        st.sidebar.write("Model classes:", xgb_model.classes_)
+
+
 
     # ===============================================
     # STEP 1: WIZARD DATA ENTRY (Divided Logic)
