@@ -37,6 +37,13 @@ def load_data():
         df["Hour"] = df["Timestamp"].dt.hour
         df["DayOfWeek"] = df["Timestamp"].dt.day_name()
     
+    # ---------------------------------------------------------
+    # 🚨 THE GLOBAL FIX: Force PyArrow strings back to 'object'
+    # ---------------------------------------------------------
+    for col in df.columns:
+        if not pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].astype('object')
+            
     return df
 
 df = load_data()
