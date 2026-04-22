@@ -119,7 +119,7 @@ with tab1:
     le = LabelEncoder()
     for col in df_enc.columns:
         if df_enc[col].dtype == 'object': df_enc[col] = le.fit_transform(df_enc[col].astype(str))
-    st.plotly_chart(px.imshow(df_enc.corr(), text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, title='Correlation Heatmap'), use_container_width=True)
+    st.plotly_chart(px.imshow(df_enc.corr(numeric_only=True), text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, title='Correlation Heatmap'), use_container_width=True)
 
 # --- TAB 2: Time ---
 with tab2:
